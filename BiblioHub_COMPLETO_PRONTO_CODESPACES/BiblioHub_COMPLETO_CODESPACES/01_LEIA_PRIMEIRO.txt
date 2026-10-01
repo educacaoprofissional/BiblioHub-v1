@@ -1,0 +1,11 @@
+BIBLIOHUB - EXECUÇÃO RÁPIDA
+
+1. Abra o Codespace do repositório.
+2. Aguarde o postCreateCommand instalar as dependências.
+3. Execute: npm start
+4. Abra PORTS > 5173 > Open in Browser.
+
+Leitor demo: aluno@bibliohub.edu.br / biblioteca123
+Administrador: admin@bibliohub.edu.br / admin123
+
+O banco SQLite é criado automaticamente em backend/data/bibliohub.db.

@@ -1,0 +1,34 @@
+import { useEffect, useMemo, useState } from "react";
+import { Toaster, toast } from "sonner";
+import { LibraryHeader } from "./components/library-header";
+import { LibrarySidebar, type ActiveView } from "./components/library-sidebar";
+import { FeaturedSection } from "./components/featured-section";
+import { BookCard } from "./components/book-card";
+import { GenreNav } from "./components/genre-nav";
+import { LoginPage } from "./components/login-page";
+import { AdminPanel } from "./components/admin-panel";
+import { api, clearToken, getToken, type Book, type User } from "./api";
+
+export default function App() {
+  const [user,setUser]=useState<User|null>(null); const [loading,setLoading]=useState(true); const [books,setBooks]=useState<Book[]>([]);
+  const [sidebarOpen,setSidebarOpen]=useState(true); const [darkMode,setDarkMode]=useState(false); const [searchQuery,setSearchQuery]=useState(""); const [activeCategory,setActiveCategory]=useState<string|null>(null); const [activeView,setActiveView]=useState<ActiveView>("home");
+  const [favorites,setFavorites]=useState<Set<number>>(new Set()); const [borrowed,setBorrowed]=useState<Set<number>>(new Set()); const [readLater,setReadLater]=useState<Set<number>>(new Set()); const [reserved,setReserved]=useState<Set<number>>(new Set());
+  useEffect(()=>{document.documentElement.classList.toggle("dark",darkMode)},[darkMode]);
+  useEffect(()=>{(async()=>{try{await loadBooks(); if(getToken()){const me=await api<{user:User}>("/api/me");setUser(me.user);await loadLibrary();}}catch{clearToken()}finally{setLoading(false)}})()},[]);
+  async function loadBooks(){setBooks(await api<Book[]>("/api/books"));}
+  async function loadLibrary(){const d=await api<{favorites:number[];readLater:number[];borrowed:number[];reserved:number[]}>("/api/me/library");setFavorites(new Set(d.favorites));setReadLater(new Set(d.readLater));setBorrowed(new Set(d.borrowed));setReserved(new Set(d.reserved));}
+  async function sync(){await Promise.all([loadBooks(),loadLibrary()]);}
+  async function act(path:string,method="POST",success?:string){try{const r=await api<{mensagem?:string}>(path,{method});toast.success(r.mensagem||success||"Operação concluída");await sync();}catch(e){toast.error(e instanceof Error?e.message:"Erro na operação")}}
+  if(loading) return <div className="flex min-h-screen items-center justify-center">Carregando BiblioHub...</div>;
+  if(!user) return <><Toaster position="bottom-right" richColors/><LoginPage onLogin={async u=>{setUser(u);await loadLibrary();toast.success(`Bem-vindo, ${u.name}!`)}}/></>;
+  const counts=useMemo(()=>{const m:Record<string,number>={};books.forEach(b=>m[b.category]=(m[b.category]??0)+1);return m},[books]);
+  const base=useMemo(()=>{let b=books;if(activeView==="favorites")b=b.filter(x=>favorites.has(x.id));else if(activeView==="mybooks")b=b.filter(x=>borrowed.has(x.id));else if(activeView==="readlater")b=b.filter(x=>readLater.has(x.id));else if(activeView==="popular")b=b.filter(x=>x.rating>=4.7);else if(activeView==="new")b=b.slice(-4);return b},[books,activeView,favorites,borrowed,readLater]);
+  const filtered=useMemo(()=>{let b=base;if(activeCategory)b=b.filter(x=>x.category===activeCategory);if(searchQuery.trim()){const q=searchQuery.toLowerCase();b=b.filter(x=>x.title.toLowerCase().includes(q)||x.author.toLowerCase().includes(q))}return b},[base,activeCategory,searchQuery]);
+  const genres=useMemo(()=>Array.from(new Set(books.map(b=>b.category))).map(c=>({category:c,books:books.filter(b=>b.category===c)})),[books]);
+  const showHome=activeView==="home"&&!searchQuery; const title=activeView==="favorites"?"Favoritos":activeView==="mybooks"?"Meus Empréstimos":activeView==="readlater"?"Ler Mais Tarde":activeView==="popular"?"Populares":activeView==="new"?"Novidades":activeCategory??(searchQuery?`Resultados para “${searchQuery}”`:"Explorar Livros");
+  function selectView(v:ActiveView){setActiveView(v);setActiveCategory(null);setSearchQuery("")}
+  const card=(book:Book)=><BookCard key={book.id} {...book} isFavorite={favorites.has(book.id)} isBorrowed={borrowed.has(book.id)} isReadLater={readLater.has(book.id)} isReserved={reserved.has(book.id)} onFavorite={()=>act(`/api/books/${book.id}/favorite`)} onReadLater={()=>act(`/api/books/${book.id}/read-later`)} onBorrow={()=>act(`/api/books/${book.id}/${borrowed.has(book.id)?"return":"borrow"}`)} onReserve={()=>act(`/api/books/${book.id}/reserve`)}/>;
+  return <><Toaster position="bottom-right" richColors/><div className="flex min-h-screen flex-col"><LibraryHeader onMenuClick={()=>setSidebarOpen(!sidebarOpen)} darkMode={darkMode} onToggleDark={()=>setDarkMode(!darkMode)} searchQuery={searchQuery} onSearch={q=>{setSearchQuery(q);if(q){setActiveView("explore");setActiveCategory(null)}}} userEmail={user.email} onLogout={async()=>{try{await api("/api/auth/logout",{method:"POST"})}catch{}clearToken();setUser(null)}}/>
+  <div className="flex flex-1"><LibrarySidebar isOpen={sidebarOpen} activeView={activeView} onViewSelect={selectView} activeCategory={activeCategory} onCategorySelect={c=>{setActiveCategory(c);setActiveView("explore");setSearchQuery("")}} favoritesCount={favorites.size} borrowedCount={borrowed.size} readLaterCount={readLater.size} categoryCounts={counts} isAdmin={user.role==="admin"}/>
+  <main className="flex-1 overflow-auto"><div className="container space-y-8 p-6">{activeView==="admin"&&user.role==="admin"?<AdminPanel onChanged={loadBooks}/>:showHome?<><FeaturedSection imageUrl="https://images.unsplash.com/photo-1603058817990-2b9a9abbce86?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080" isBorrowed={borrowed.has(17)} onBorrow={()=>books.find(b=>b.id===17)&&act(`/api/books/17/${borrowed.has(17)?"return":"borrow"}`)} onDetails={()=>toast.info("Destaque cadastrado no acervo")}/><GenreNav activeCategory={activeCategory} onSelect={c=>{setActiveCategory(c);setActiveView("explore")}} categoryCounts={counts}/>{genres.map(({category,books:b})=><section key={category} className="space-y-3"><div className="flex items-center justify-between"><h3 className="text-xl font-bold">{category}</h3><button className="text-sm text-muted-foreground hover:underline" onClick={()=>{setActiveCategory(category);setActiveView("explore")}}>Ver todos →</button></div><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{b.map(card)}</div></section>)}</>:<div className="space-y-6"><h2 className="text-2xl font-bold">{title}</h2>{["explore","popular","new"].includes(activeView)&&<GenreNav activeCategory={activeCategory} onSelect={c=>setActiveCategory(c)} categoryCounts={counts}/>}<div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{filtered.length?filtered.map(card):<p className="text-muted-foreground">Nenhum livro encontrado.</p>}</div></div>}</div></main></div></div></>;
+}
